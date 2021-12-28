@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+
+[[ -n $DEBUG ]] && set -x
+
+KUBECTL_VERSION=$(kubectl version -o json)
+
+# Requre commands/software
+# * asdf
+# * jq
+
+requre_cmd(){
+  cmd=$1
+  if ! hash "$1" 2>/dev/null; then
+    echo "$1 is not installed."
+    exit 1
+  fi
+}
+
+print_kubectl_version(){
+  local server=$(echo "${KUBECTL_VERSION}" | jq -r .serverVersion.gitVersion)
+  local client=$(echo "${KUBECTL_VERSION}" | jq -r .clientVersion.gitVersion)
+
+  echo "Server version: $server"
+  echo "Client version: $client"
+}
+
+
+check_target_version(){
+  local installed_list=$(asdf list kubectl)
+
+  # If target version installed ,use that.
+  for i in $installed_list; do
+    local version=$(echo ${i%.*})
+
+    if [[ $version == $SERVER_VERSION ]]; then
+      KUBECTL_INSTALLED="true"
+      VERSION=$i
+      break
+    fi
+  done
+}
+
+install_specific_version(){
+  # If target version is not exist.
+  local server_versions=$(asdf list all kubectl | grep $SERVER_VERSION)
+  list=()
+
+  for i in $server_versions; do
+
+    if [[ $i =~ ^([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+      list=($list $i)
+    fi
+  done
+
+  VERSION=${list[-1]}
+
+  echo "Same kubectl version missing as server's."
+  echo "Installing target version ....."
+  asdf install kubectl $VERSION > /dev/null
+  echo "$VERSION installed !!"
+}
+
+# Check that server version and client version same or not.
+# If these are not same, client version switch to server version.
+check_versions(){
+  local server=$(echo "${KUBECTL_VERSION}" | jq -r .serverVersion.gitVersion | sed 's/v//g')
+  local client=$(echo "${KUBECTL_VERSION}" | jq -r .clientVersion.gitVersion | sed 's/v//g')
+
+  SERVER_VERSION=$(echo ${server%.*})
+  CLIENT_VERSION=$(echo ${client%.*})
+
+  if [[ $SERVER_VERSION == $CLIENT_VERSION ]]; then
+    echo "Server and Client version are same. Don't need to switch kubectl version."
+    exit 0
+
+  else
+    NEED_SWITCH=true
+  fi
+}
+
+
+main (){
+  requre_cmd asdf
+  requre_cmd jq
+
+  check_versions
+
+  if [[ "$NEED_SWITCH" == "true" ]]; then
+    check_target_version
+
+    if ! [[ $KUBECTL_INSTALLED == true ]]; then
+      install_specific_version
+    fi
+
+    asdf global kubectl $VERSION
+    echo "Switch to version: $VERSION"
+
+  fi
+}
+
+main
